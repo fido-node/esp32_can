@@ -24,10 +24,11 @@
 #include "esp_gatt_defs.h"
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
-#include "driver/spi_master.h"
+
 #include "soc/gpio_struct.h"
 #include "driver/gpio.h"
 #include "hid_dev.h"
+#include "spi_routine"
 
 /**
  * Brief:
@@ -47,13 +48,6 @@
  */
 
 #define HID_DEMO_TAG "HID_DEMO"
-
-
-#define PIN_NUM_MISO 25
-#define PIN_NUM_MOSI 23
-#define PIN_NUM_CLK  19
-#define PIN_NUM_CS   5
-#define CAN_INT      17
 
 #define GPIO_LED    2
 #define GPIO_OUTPUT_PIN_SEL  (1<<GPIO_LED)
@@ -147,21 +141,10 @@ static void gpio_demo_init(void)
     io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
 
-    //change gpio intrrupt type for one pin
-    gpio_set_intr_type(CAN_INT, GPIO_INTR_ANYEDGE);
-
     //create a queue to handle gpio event from isr
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     //start gpio task
     xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
-
-    //install gpio isr service
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    //hook isr handler for specific gpio pin again
-    gpio_isr_handler_add(CAN_INT, gpio_isr_handler, (void*) CAN_INT);
-
-
-
 }
 
 
@@ -249,29 +232,13 @@ void hid_demo_task(void *pvParameters)
 void app_main()
 {
     esp_err_t ret;
+    
+    ret = init_spi();
+    if (ret) {
+        ESP_LOGE(HID_DEMO_TAG, "%s initialize spi failed\n", __func__);
+        return;
+    }
 
-        spi_device_handle_t spi;
-    spi_bus_config_t buscfg={
-        .miso_io_num=PIN_NUM_MISO,
-        .mosi_io_num=PIN_NUM_MOSI,
-        .sclk_io_num=PIN_NUM_CLK,
-        .quadwp_io_num=-1,
-        .quadhd_io_num=-1,
-        .max_transfer_sz=0
-    };
-    spi_device_interface_config_t devcfg={
-        .clock_speed_hz=10*1000*1000,           //Clock out at 10 MHz
-        .mode=0,                                //SPI mode 0
-        .spics_io_num=PIN_NUM_CS,               //CS pin
-        .queue_size=7,                          //We want to be able to queue 7 transactions at a time
-    };
-
-        //Initialize the SPI bus
-    ret=spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-    ESP_ERROR_CHECK(ret);
-    //Attach the LCD to the SPI bus
-    ret=spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
-    ESP_ERROR_CHECK(ret);
 
     // Initialize NVS.
     ret = nvs_flash_init();
