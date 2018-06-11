@@ -1,6 +1,5 @@
-
 #include "MCP2515.h"
-
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -67,6 +66,7 @@
 #define FLAG_RXM1                  0x40
 
 extern xQueueHandle can_evt_queue;
+extern xQueueHandle can_frame_queue;
 
 #define MCP "MCP"
 
@@ -94,41 +94,123 @@ uint8_t data = 0xC0;
 SemaphoreHandle_t mtx;
 
 void gpio_isr_handler(void* arg) {
-	xQueueSendFromISR(can_evt_queue, &data, NULL);
+	if (mtx != NULL) {
+		xQueueSendFromISR(can_evt_queue, &data, NULL);
+	}
+}
+
+
+void log_rcv(void* arg) {
+	for(;;) {
+		uint32_t fp = 0;
+		if(xQueueReceive(can_frame_queue, &fp, portMAX_DELAY)) {
+			// ESP_LOGE(MCP, "pr: %d", fp);
+			can_frame_tx_t *f = (can_frame_tx_t *)fp;
+			ESP_LOGI(MCP, "ID: %li, DLC: %d, [%x,%x,%x,%x,%x,%x,%x,%x]", 
+				f->CanId,
+				f->DLC,
+				f->Data[0],
+				f->Data[1],
+				f->Data[2],
+				f->Data[3],
+				f->Data[4],
+				f->Data[5],
+				f->Data[6],
+				f->Data[7]);
+			free(fp);
+		}
+		vTaskDelay(5/portTICK_PERIOD_MS);
+	}
 }
 
 void read_frame() {
 	uint8_t io_num;
 	for(;;) {
 		led_off();
-		if(xQueueReceive(can_evt_queue, &io_num, 1)) {
-			xSemaphoreTake(mtx, 100000);
-			led_on();
-			ESP_LOGI(MCP, "ISR CAN RCV");
-			int n = 0;
-			uint8_t response[4];
-			read_register(REG_CANINTF, &response);
-			if ( response[2] != 0) {
-				uint8_t intf = response[2];
-				ESP_LOGI(MCP, "CAN BF: %d", intf);
+		if(xQueueReceive(can_evt_queue, &io_num, portMAX_DELAY)) {
+			ESP_LOGI(MCP, "ISR task from queue");
+			uint8_t taken = xSemaphoreTake(mtx, portMAX_DELAY);
 
+			while(taken != 1) {
+				taken = xSemaphoreTake(mtx, portMAX_DELAY);
+			}
+			ESP_LOGI(MCP, "lock semaphore");
+			led_on();
+
+			int n = 0;
+
+			if ( read_reg(REG_CANINTF) != 0) {
+				uint8_t intf = read_reg(REG_CANINTF);
 				if (intf & FLAG_RXnIF(0)) {
 					n = 0;
-					// modify_register(REG_CANINTF, FLAG_RXnIF(n), 0x00);
 				} else if (intf & FLAG_RXnIF(1)) {
 					n = 1;
 				}
+				ESP_LOGI(MCP, "CAN BF: %d", n);
+
+				long int id = -1;
+				bool isExt = (read_reg(REG_RXBnSIDL(n)) & FLAG_IDE) ? true : false;
+				int dlc = 0;
+				uint8_t data[8];
+				memset(&data, 0, sizeof(data));
+				uint32_t idA = ((read_reg(REG_RXBnSIDH(n)) << 3) & 0x07f8) | ((read_reg(REG_RXBnSIDL(n)) >> 5) & 0x07);
+				if (isExt) {
+					uint32_t idB = (((uint32_t)(read_reg(REG_RXBnSIDL(n)) & 0x03) << 16) & 0x30000) | ((read_reg(REG_RXBnEID8(n)) << 8) & 0xff00) | read_reg(REG_RXBnEID0(n));
+					id = (idA << 18) | idB;
+				} else {
+					id = idA;
+				}
+				dlc = read_reg(REG_RXBnDLC(n)) & 0x0f;
+
+				for (int i = 0; i < dlc; i++) {
+					data[i] = read_reg(REG_RXBnD0(n) + i);
+				}
+
+				can_frame_tx_t *frame = NULL;
+				frame = malloc(sizeof(can_frame_tx_t));
+				if (frame != NULL) {
+					ESP_LOGI(MCP, "build frame");
+					frame->IsExt = isExt;
+					frame->CanId = id;
+					frame->DLC = dlc;
+					memcpy(&frame->Data, &data, sizeof(data));
+					xQueueSend(can_frame_queue, &frame, NULL);
+				}
 				mod_register(REG_CANINTF, FLAG_RXnIF(n), 0x00);
 			}
-		xSemaphoreGive(mtx);
+			xSemaphoreGive(mtx);
+			ESP_LOGI(MCP, "unlock semaphore");
 		}
+		vTaskDelay(3/portTICK_PERIOD_MS);
 	}
 }
 
 
 esp_err_t init_mcp(long baudRate) {
-	mtx = xSemaphoreCreateMutex();
 	esp_err_t err;
+	gpio_config_t io_conf;
+
+	xTaskCreatePinnedToCore(&read_frame, "read_frame", 8192, NULL, 5, NULL, 1);
+	xTaskCreatePinnedToCore(&log_rcv, "log rcv", 4096, NULL, 15, NULL,1);
+		//interrupt of rising edge
+	io_conf.intr_type = GPIO_INTR_NEGEDGE;
+	//bit mask of the pins, use GPIO4/5 here
+	io_conf.pin_bit_mask = CAN_INT;
+	//set as input mode    
+	io_conf.mode = GPIO_MODE_INPUT;
+	//enable pull-up mode
+	io_conf.pull_up_en = 1;
+	gpio_config(&io_conf);
+
+	gpio_set_intr_type(CAN_INT, GPIO_INTR_NEGEDGE);
+	gpio_install_isr_service(ESP_INTR_FLAG_EDGE);
+	gpio_pullup_en(CAN_INT);
+	// gpio_intr_enable(CAN_INT);
+	gpio_isr_handler_add(CAN_INT, &gpio_isr_handler, (void*) CAN_INT);
+
+	// gpio_set_intr_type(CAN_INT, GPIO_INTR_POSEDGE);
+	// gpio_set_intr_type(CAN_INT, GPIO_INTR_NEGEDGE);
+
 
 	err = send_data(&data, 1);
 	ESP_LOGI(MCP, "Send 0xc0");
@@ -137,7 +219,7 @@ esp_err_t init_mcp(long baudRate) {
 		return err;
 	}
 
-	vTaskDelay(100);
+	vTaskDelay(10 / portTICK_PERIOD_MS);
 	
 	err = write_register(REG_CANCTRL, 0x80);
 	ESP_LOGI(MCP, "write_reg REG_CANCTRL");
@@ -146,17 +228,7 @@ esp_err_t init_mcp(long baudRate) {
 		return err;
 	}
 
-	uint8_t response[4];
-
-	err = read_register(REG_CANCTRL, &response);
-	if (err) {
-		ESP_LOGE(MCP, "read_register REG_CANCTRL err");
-		return err;
-	}
-	ESP_LOGI(MCP, "response %d, %d, %d, %d", response[0], response[1], response[2], response[3]);
-
-
-	if (response[2] != 0x80) {
+	if (read_reg(REG_CANCTRL) != 0x80) {
 		return 1;
 	};
 	led_on();
@@ -190,31 +262,24 @@ esp_err_t init_mcp(long baudRate) {
 	ESP_LOGI(MCP, "enable receive");
 	// write_register(REG_CANCTRL, 0x40);
 	write_register(REG_CANCTRL, 0x0);
-	read_register(REG_CANCTRL, &response);
-	// if (response[2] != 0x40) {
-	if (response[2] != 0x00) {
+	// if (read_reg(REG_CANCTRL) != 0x40) {
+	if (read_reg(REG_CANCTRL) != 0x00) {
 		return 1;
 	}
 
-
-	ESP_LOGI(MCP, "finish init");
 	led_off();
 
-	xTaskCreate(&read_frame, "read_frame", 8192, NULL, 10, NULL);
-
-	//change gpio intrrupt type for one pin
-	gpio_set_intr_type(CAN_INT, GPIO_INTR_LOW_LEVEL);
-
-    //install gpio isr service
-	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    //hook isr handler for specific gpio pin again
-	gpio_isr_handler_add(CAN_INT, gpio_isr_handler, (void*) CAN_INT);
-	
+	mtx = xSemaphoreCreateMutex();
+	ESP_LOGI(MCP, "finish init");
 	return 0;
 }
 
 int send_frame(can_frame_tx_t *frame) {
-	xSemaphoreTake(mtx, 10000);
+	uint8_t taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
+
+	while(taken != 1) {
+		taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
+	}
 	int n = 0;
 	if (frame->IsExt) {
 		write_register(REG_TXBnSIDH(n), frame->CanId >> 21);
@@ -235,20 +300,14 @@ int send_frame(can_frame_tx_t *frame) {
 
 	write_register(REG_TXBnCTRL(n), 0x08);
 
-	uint8_t response[4];
-	read_register(REG_TXBnCTRL(n), &response);
-
-	while (response[2] & 0x08) {
-		uint8_t  tx_read[4];
-		read_register(REG_TXBnCTRL(n), &tx_read);
-		if (tx_read[2] & 0x10) {
+	while (read_reg(REG_TXBnCTRL(n)) & 0x08) {
+		if (read_reg(REG_TXBnCTRL(n)) & 0x10) {
 			mod_register(REG_CANCTRL, 0x10, 0x10);
 		}
-		vTaskDelay(1);
-		read_register(REG_TXBnCTRL(n), &response);
+		vTaskDelay(1 / portTICK_PERIOD_MS);
 	}
 	mod_register(REG_CANINTF, FLAG_TXnIF(n), 0x00);
-	read_register(REG_TXBnCTRL(n), &response);
+	int result = (read_reg(REG_TXBnCTRL(n)) & 0x70) ? 0 : 1;
 	xSemaphoreGive(mtx);
-	return (response[2] & 0x70) ? 0 : 1;
+	return result;
 }

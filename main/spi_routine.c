@@ -13,16 +13,12 @@
 #include "soc/gpio_struct.h"
 #include "driver/gpio.h"
 
-
 #define PIN_NUM_MISO 12
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 #define PIN_NUM_CS   15
 
 static spi_device_handle_t spi;
-
-// void IRAM_ATTR lcd_spi_pre_transfer_callback(spi_transaction_t *t) {
-// }
 
 esp_err_t init_spi() {
 	esp_err_t ret;
@@ -49,18 +45,6 @@ esp_err_t init_spi() {
 	//Attach the LCD to the SPI bus
 	ret=spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
 	ESP_ERROR_CHECK(ret);
-	return ret;
-}
-
-
-esp_err_t p_send_data(spi_device_handle_t spi, const uint8_t *data, int len) {
-	esp_err_t ret;
-	spi_transaction_t t;
-	if (len==0) return 0;     
-	memset(&t, 0, sizeof(t)); 
-	t.length=len*8;    
-	t.tx_buffer=data;  
-	ret=spi_device_transmit(spi, &t); 
 	return ret;
 }
 
@@ -97,7 +81,7 @@ esp_err_t mod_register(uint8_t addr, uint8_t mask, uint8_t val) {
 	return ret;        
 }
 
-esp_err_t read_register(uint8_t addr, uint8_t (*val)[4]) {
+uint8_t read_reg(uint8_t addr) {
 	esp_err_t ret;
 	spi_transaction_t r;
 
@@ -111,14 +95,16 @@ esp_err_t read_register(uint8_t addr, uint8_t (*val)[4]) {
     r.flags = SPI_TRANS_USE_RXDATA;
 
     ret = spi_device_transmit(spi, &r);
-
-	if (ret == ESP_OK) {
-		memcpy(val, r.rx_data, 4);
-	};
-	return ret;
-
+	return r.rx_data[2];
 }
 
 esp_err_t send_data(const uint8_t *data, int len) {
-	return p_send_data(spi, data, len);
+	esp_err_t ret;
+	spi_transaction_t t;
+	if (len==0) return 0;     
+	memset(&t, 0, sizeof(t)); 
+	t.length=len*8;    
+	t.tx_buffer=data;  
+	ret=spi_device_transmit(spi, &t); 
+	return ret;
 }
