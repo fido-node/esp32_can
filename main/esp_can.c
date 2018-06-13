@@ -18,7 +18,7 @@
 #include "can.h"
 
 
-#define HID_DEMO_TAG "HID_DEMO"
+#define MAIN_TAG "MAIN"
 
 xQueueHandle can_evt_queue = NULL;
 xQueueHandle can_frame_queue = NULL;
@@ -34,7 +34,7 @@ void send_can(void* arg) {
 	};
 
 	for(;;) {
-		ESP_LOGI(HID_DEMO_TAG, "SND CAN FRM");
+		ESP_LOGI(MAIN_TAG, "SND CAN FRM");
 		send_frame(&frame);
 		vTaskDelay(1000/portTICK_PERIOD_MS);
 	}
@@ -53,18 +53,18 @@ void app_main() {
 
 	ret = init_spi();
 	if (ret) {
-		ESP_LOGE(HID_DEMO_TAG, "%s initialize spi failed\n", __func__);
+		ESP_LOGE(MAIN_TAG, "%s initialize spi failed\n", __func__);
 		return;
 	}
 	ret = init_mcp((long) 500E3);
 	if (ret) {
-		ESP_LOGE(HID_DEMO_TAG, "%s initialize mcp failed\n", __func__);
+		ESP_LOGE(MAIN_TAG, "%s initialize mcp failed\n", __func__);
 		return;
 	}
 
 	ret = enable_mcp();
 	if (ret) {
-		ESP_LOGE(HID_DEMO_TAG, "enable mcp fail");
+		ESP_LOGE(MAIN_TAG, "enable mcp fail");
 		return;
 	}
 

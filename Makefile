@@ -3,9 +3,9 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := esp_can_hid
+PROJECT_NAME := esp_can
 
 COMPONENT_ADD_INCLUDEDIRS := components/include	\
-								
+
 
 include $(IDF_PATH)/make/project.mk
