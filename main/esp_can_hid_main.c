@@ -1,9 +1,3 @@
-/* This example code is in the Public Domain (or CC0 licensed, at your option.)
-   Unless required by applicable law or agreed to in writing, this software is 
-   distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR  
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,12 +40,17 @@ void send_can(void* arg) {
 	}
 }
 
+void test_can_routine() {
+	loopback_mcp();
+	xTaskCreate(&send_can, "can_send_task", 2048, NULL, 10, NULL);
+}
+
 void app_main() {
-	led_off();
 	esp_err_t ret;
 	can_evt_queue = xQueueCreate(10, sizeof(uint32_t));
 	can_frame_queue = xQueueCreate(10, sizeof(uint32_t));
-	
+	init_gpio();
+
 	ret = init_spi();
 	if (ret) {
 		ESP_LOGE(HID_DEMO_TAG, "%s initialize spi failed\n", __func__);
@@ -63,8 +62,12 @@ void app_main() {
 		return;
 	}
 
-	//init the gpio pin
-	// gpio_demo_init();
-	// xTaskCreate(&send_can, "can_send_task", 2048, NULL, 10, NULL);
+	ret = enable_mcp();
+	if (ret) {
+		ESP_LOGE(HID_DEMO_TAG, "enable mcp fail");
+		return;
+	}
+
+	// test_can_routine();
 }
 

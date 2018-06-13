@@ -49,62 +49,62 @@ esp_err_t init_spi() {
 }
 
 esp_err_t write_register(uint8_t addr, uint8_t val) {
- 	esp_err_t ret;
+	esp_err_t ret;
 	spi_transaction_t t;
 
- 	uint8_t data[3];
- 	data[0]=0x02;
- 	data[1]=addr;
- 	data[2]=val;
+	uint8_t data[3];
+	data[0]=0x02;
+	data[1]=addr;
+	data[2]=val;
 
 	memset(&t, 0, sizeof(t));
-	t.length=24;             
-	t.tx_buffer=&data;      
+	t.length=24;
+	t.tx_buffer=&data;
 	ret=spi_device_transmit(spi, &t);
-	return ret;        
+	return ret;
 }
 
 esp_err_t mod_register(uint8_t addr, uint8_t mask, uint8_t val) {
 	spi_transaction_t t;
- 	esp_err_t ret;
+	esp_err_t ret;
 
- 	uint8_t data[4];
- 	data[0]=0x05;
- 	data[1]=addr;
- 	data[2]=mask;
- 	data[3]=val;
+	uint8_t data[4];
+	data[0]=0x05;
+	data[1]=addr;
+	data[2]=mask;
+	data[3]=val;
 
-	memset(&t, 0, sizeof(t)); 
-	t.length=32;       
-	t.tx_buffer=&data;           
+	memset(&t, 0, sizeof(t));
+	t.length=32;
+	t.tx_buffer=&data;
 	ret=spi_device_transmit(spi, &t);
-	return ret;        
+	return ret;
 }
 
 uint8_t read_reg(uint8_t addr) {
 	esp_err_t ret;
 	spi_transaction_t r;
 
- 	uint8_t data[2];
- 	data[0]=0x03;	
- 	data[1]=addr;
+	uint8_t data[2];
+	data[0]=0x03;
+	data[1]=addr;
 
 	memset(&r, 0, sizeof(r));
-    r.length=8*4;
-    r.tx_buffer=&data;
-    r.flags = SPI_TRANS_USE_RXDATA;
+	r.length=8*4;
+	r.tx_buffer=&data;
+	r.flags = SPI_TRANS_USE_RXDATA;
 
-    ret = spi_device_transmit(spi, &r);
+	ret = spi_device_transmit(spi, &r);
 	return r.rx_data[2];
 }
 
 esp_err_t send_data(const uint8_t *data, int len) {
 	esp_err_t ret;
 	spi_transaction_t t;
-	if (len==0) return 0;     
-	memset(&t, 0, sizeof(t)); 
-	t.length=len*8;    
-	t.tx_buffer=data;  
-	ret=spi_device_transmit(spi, &t); 
+	if (len==0) return 0;
+	memset(&t, 0, sizeof(t));
+	t.length=len*8;
+	t.tx_buffer=data;
+	ret=spi_device_transmit(spi, &t);
 	return ret;
 }

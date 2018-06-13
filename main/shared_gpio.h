@@ -12,5 +12,6 @@
 void tgl_led();
 void led_on();
 void led_off();
+void init_gpio();
 
 #endif

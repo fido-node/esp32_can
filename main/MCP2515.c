@@ -93,20 +93,17 @@ uint8_t data = 0xC0;
 
 SemaphoreHandle_t mtx;
 
-void gpio_isr_handler(void* arg) {
-	if (mtx != NULL) {
+void IRAM_ATTR gpio_isr_handler(void* arg) {
 		xQueueSendFromISR(can_evt_queue, &data, NULL);
-	}
 }
-
 
 void log_rcv(void* arg) {
 	for(;;) {
 		uint32_t fp = 0;
 		if(xQueueReceive(can_frame_queue, &fp, portMAX_DELAY)) {
-			// ESP_LOGE(MCP, "pr: %d", fp);
+			tgl_led();
 			can_frame_tx_t *f = (can_frame_tx_t *)fp;
-			ESP_LOGI(MCP, "ID: %li, DLC: %d, [%x,%x,%x,%x,%x,%x,%x,%x]", 
+			ESP_LOGI(MCP, "ID: %li, DLC: %d, [%x,%x,%x,%x,%x,%x,%x,%x]",
 				f->CanId,
 				f->DLC,
 				f->Data[0],
@@ -119,7 +116,7 @@ void log_rcv(void* arg) {
 				f->Data[7]);
 			free(fp);
 		}
-		vTaskDelay(5/portTICK_PERIOD_MS);
+		vTaskDelay(1/portTICK_PERIOD_MS);
 	}
 }
 
@@ -128,13 +125,11 @@ void read_frame() {
 	for(;;) {
 		led_off();
 		if(xQueueReceive(can_evt_queue, &io_num, portMAX_DELAY)) {
-			ESP_LOGI(MCP, "ISR task from queue");
 			uint8_t taken = xSemaphoreTake(mtx, portMAX_DELAY);
 
 			while(taken != 1) {
 				taken = xSemaphoreTake(mtx, portMAX_DELAY);
 			}
-			ESP_LOGI(MCP, "lock semaphore");
 			led_on();
 
 			int n = 0;
@@ -146,7 +141,6 @@ void read_frame() {
 				} else if (intf & FLAG_RXnIF(1)) {
 					n = 1;
 				}
-				ESP_LOGI(MCP, "CAN BF: %d", n);
 
 				long int id = -1;
 				bool isExt = (read_reg(REG_RXBnSIDL(n)) & FLAG_IDE) ? true : false;
@@ -169,7 +163,6 @@ void read_frame() {
 				can_frame_tx_t *frame = NULL;
 				frame = malloc(sizeof(can_frame_tx_t));
 				if (frame != NULL) {
-					ESP_LOGI(MCP, "build frame");
 					frame->IsExt = isExt;
 					frame->CanId = id;
 					frame->DLC = dlc;
@@ -181,58 +174,65 @@ void read_frame() {
 			xSemaphoreGive(mtx);
 			ESP_LOGI(MCP, "unlock semaphore");
 		}
-		vTaskDelay(3/portTICK_PERIOD_MS);
+		vTaskDelay(1/portTICK_PERIOD_MS);
 	}
 }
 
+void init_interrupt_handler() {
+	gpio_intr_disable(CAN_INT);
+	gpio_pulldown_en(CAN_INT);
+	gpio_set_intr_type(CAN_INT, GPIO_INTR_NEGEDGE);
+	gpio_install_isr_service(( ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LOWMED));
+	gpio_isr_handler_add(CAN_INT, &gpio_isr_handler, (void*) CAN_INT);
+}
 
-esp_err_t init_mcp(long baudRate) {
-	esp_err_t err;
-	gpio_config_t io_conf;
-
+void init_rcv_task() {
 	xTaskCreatePinnedToCore(&read_frame, "read_frame", 8192, NULL, 5, NULL, 1);
 	xTaskCreatePinnedToCore(&log_rcv, "log rcv", 4096, NULL, 15, NULL,1);
-		//interrupt of rising edge
-	io_conf.intr_type = GPIO_INTR_NEGEDGE;
-	//bit mask of the pins, use GPIO4/5 here
-	io_conf.pin_bit_mask = CAN_INT;
-	//set as input mode    
-	io_conf.mode = GPIO_MODE_INPUT;
-	//enable pull-up mode
-	io_conf.pull_up_en = 1;
-	gpio_config(&io_conf);
+}
 
-	gpio_set_intr_type(CAN_INT, GPIO_INTR_NEGEDGE);
-	gpio_install_isr_service(ESP_INTR_FLAG_EDGE);
-	gpio_pullup_en(CAN_INT);
-	// gpio_intr_enable(CAN_INT);
-	gpio_isr_handler_add(CAN_INT, &gpio_isr_handler, (void*) CAN_INT);
+int set_mode(uint8_t mode) {
+	uint8_t taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
 
-	// gpio_set_intr_type(CAN_INT, GPIO_INTR_POSEDGE);
-	// gpio_set_intr_type(CAN_INT, GPIO_INTR_NEGEDGE);
-
-
-	err = send_data(&data, 1);
-	ESP_LOGI(MCP, "Send 0xc0");
-	if (err) {
-		ESP_LOGE(MCP, "Send 0xc0 err");
-		return err;
+	while(taken != 1) {
+		taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
 	}
 
-	vTaskDelay(10 / portTICK_PERIOD_MS);
-	
-	err = write_register(REG_CANCTRL, 0x80);
-	ESP_LOGI(MCP, "write_reg REG_CANCTRL");
-	if (err) {
-		ESP_LOGE(MCP, "write_reg REG_CANCTRL err");
-		return err;
-	}
-
-	if (read_reg(REG_CANCTRL) != 0x80) {
+	write_register(REG_CANCTRL, mode);
+	if (read_reg(REG_CANCTRL) != mode) {
 		return 1;
-	};
-	led_on();
+	}
 
+	xSemaphoreGive(mtx);
+	return 0;
+}
+
+
+int disable_mcp() {
+	if(set_mode(0x80)) {
+		ESP_LOGE(MCP, "Could not disable");
+		return 1;
+	}
+	return 0;
+}
+
+int enable_mcp() {
+	if(set_mode(0x0)) {
+		ESP_LOGE(MCP, "Could not start usual mode");
+		return 1;
+	}
+	return 0;
+}
+
+int loopback_mcp() {
+	if(set_mode(0x40)) {
+		ESP_LOGE(MCP, "Could not start loopback");
+		return 1;
+	}
+	return 0;
+}
+
+int set_speed(long baudRate) {
 	const uint8_t* cnf = NULL;
 
 	for (unsigned int i = 0; i < (sizeof(CNF_MAPPER) / sizeof(CNF_MAPPER[0])); i++) {
@@ -245,34 +245,50 @@ esp_err_t init_mcp(long baudRate) {
 	if (cnf == NULL) {
 		return 1;
 	}
-
-	ESP_LOGI(MCP, "response set speed");
 	write_register(REG_CNF1, cnf[0]);
 	write_register(REG_CNF2, cnf[1]);
 	write_register(REG_CNF3, cnf[2]);
+	return 0;
+}
 
-	ESP_LOGI(MCP, "response set int");
+esp_err_t init_mcp(long baudRate) {
+	esp_err_t err;
+	mtx = xSemaphoreCreateMutex();
+	init_rcv_task();
+	init_interrupt_handler();
+
+	err = send_data(&data, 1);
+	if (err) {
+		ESP_LOGE(MCP, "Send 0xc0 err");
+		return err;
+	}
+	gpio_intr_enable(CAN_INT);
+
+	vTaskDelay(10 / portTICK_PERIOD_MS);
+
+	err = disable_mcp();
+	if (err) {
+		ESP_LOGE(MCP, "write_reg REG_CANCTRL err");
+		return err;
+	}
+
+	err = set_speed(baudRate);
+	if (err) {
+		ESP_LOGE(MCP, "set speed err");
+		return err;
+	};
+
 	write_register(REG_CANINTE, FLAG_RXnIE(1) | FLAG_RXnIE(0));
 	write_register(REG_BFPCTRL, 0x00);
 	write_register(REG_TXRTSCTRL, 0x00);
 	write_register(REG_RXBnCTRL(0), FLAG_RXM1 | FLAG_RXM0);
 	write_register(REG_RXBnCTRL(1), FLAG_RXM1 | FLAG_RXM0);
 
-
-	ESP_LOGI(MCP, "enable receive");
-	// write_register(REG_CANCTRL, 0x40);
-	write_register(REG_CANCTRL, 0x0);
-	// if (read_reg(REG_CANCTRL) != 0x40) {
-	if (read_reg(REG_CANCTRL) != 0x00) {
-		return 1;
-	}
-
-	led_off();
-
-	mtx = xSemaphoreCreateMutex();
 	ESP_LOGI(MCP, "finish init");
 	return 0;
 }
+
+
 
 int send_frame(can_frame_tx_t *frame) {
 	uint8_t taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
@@ -280,6 +296,7 @@ int send_frame(can_frame_tx_t *frame) {
 	while(taken != 1) {
 		taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
 	}
+
 	int n = 0;
 	if (frame->IsExt) {
 		write_register(REG_TXBnSIDH(n), frame->CanId >> 21);
