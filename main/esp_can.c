@@ -23,8 +23,6 @@
 xQueueHandle can_evt_queue = NULL;
 xQueueHandle can_frame_queue = NULL;
 
-#define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
-
 void send_can(void* arg) {
 	can_frame_tx_t frame = {
 		.IsExt = true,
