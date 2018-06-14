@@ -8,5 +8,6 @@ esp_err_t send_frame(can_frame_tx_t *frame);
 int loopback_mcp();
 int disable_mcp();
 int enable_mcp();
-
+void set_cb(void(*cb)(can_frame_tx_t *));
+void remove_cb();
 #endif

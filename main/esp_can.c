@@ -34,7 +34,7 @@ void send_can(void* arg) {
 	for(;;) {
 		ESP_LOGI(MAIN_TAG, "SND CAN FRM");
 		send_frame(&frame);
-		vTaskDelay(1000/portTICK_PERIOD_MS);
+		vTaskDelay(500/portTICK_PERIOD_MS);
 	}
 }
 
@@ -43,29 +43,48 @@ void test_can_routine() {
 	xTaskCreate(&send_can, "can_send_task", 2048, NULL, 10, NULL);
 }
 
+void frame_cb(can_frame_tx_t *f) {
+	ESP_LOGI(MAIN_TAG, "ID: %li, DLC: %d, [%x,%x,%x,%x,%x,%x,%x,%x]",
+				f->CanId,
+				f->DLC,
+				f->Data[0],
+				f->Data[1],
+				f->Data[2],
+				f->Data[3],
+				f->Data[4],
+				f->Data[5],
+				f->Data[6],
+				f->Data[7]);
+}
+
 void app_main() {
 	esp_err_t ret;
 	can_evt_queue = xQueueCreate(10, sizeof(uint32_t));
 	can_frame_queue = xQueueCreate(10, sizeof(uint32_t));
 	init_gpio();
 
+	set_cb(&frame_cb);
+
 	ret = init_spi();
 	if (ret) {
 		ESP_LOGE(MAIN_TAG, "%s initialize spi failed\n", __func__);
 		return;
 	}
+
+
 	ret = init_mcp((long) 500E3);
 	if (ret) {
 		ESP_LOGE(MAIN_TAG, "%s initialize mcp failed\n", __func__);
 		return;
 	}
 
-	ret = enable_mcp();
-	if (ret) {
-		ESP_LOGE(MAIN_TAG, "enable mcp fail");
-		return;
-	}
+	test_can_routine();
 
-	// test_can_routine();
+	// ret = enable_mcp();
+	// if (ret) {
+		// ESP_LOGE(MAIN_TAG, "enable mcp fail");
+		// return;
+	// }
+
 }
 
