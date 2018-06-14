@@ -10,7 +10,6 @@
 #include "esp_log.h"
 
 #include "spi_routine.h"
-#include "shared_gpio.h"
 
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -105,6 +104,12 @@ void(*callback)(can_frame_tx_t *) = NULL;
 
 void IRAM_ATTR gpio_isr_handler(void* arg) {
 	xQueueSendFromISR(can_evt_queue, &data, NULL);
+}
+
+
+void p_tg(uint8_t id) {
+	uint8_t state = gpio_get_level(id);
+	gpio_set_level(id, 1 - state);
 }
 
 void set_cb(void(*cb)(can_frame_tx_t *)) {
@@ -261,6 +266,10 @@ int set_speed(long baudRate) {
 
 esp_err_t init_mcp(long baudRate) {
 	esp_err_t err;
+
+	gpio_set_direction(LED_TX, GPIO_MODE_INPUT_OUTPUT);
+	gpio_set_direction(LED_RX, GPIO_MODE_INPUT_OUTPUT);
+
 	mtx = xSemaphoreCreateMutex();
 	init_rcv_task();
 	init_interrupt_handler();

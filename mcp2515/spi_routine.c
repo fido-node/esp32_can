@@ -7,8 +7,6 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 
-#include "shared_gpio.h"
-
 #include "driver/spi_master.h"
 #include "soc/gpio_struct.h"
 #include "driver/gpio.h"
