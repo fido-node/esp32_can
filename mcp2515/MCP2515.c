@@ -106,12 +106,6 @@ void IRAM_ATTR gpio_isr_handler(void* arg) {
 	xQueueSendFromISR(can_evt_queue, &data, NULL);
 }
 
-
-void p_tg(uint8_t id) {
-	uint8_t state = gpio_get_level(id);
-	gpio_set_level(id, 1 - state);
-}
-
 void set_cb(void(*cb)(can_frame_tx_t *)) {
 	callback = cb;
 }
@@ -125,7 +119,6 @@ void log_rcv(void* arg) {
 	for(;;) {
 		uint32_t fp = 0;
 		if(xQueueReceive(can_frame_queue, &fp, portMAX_DELAY)) {
-			p_tg(LED_RX);
 			can_frame_tx_t *f = (can_frame_tx_t *)fp;
 			if (callback != NULL) {
 				callback(f);
@@ -267,9 +260,6 @@ int set_speed(long baudRate) {
 esp_err_t init_mcp(long baudRate) {
 	esp_err_t err;
 
-	gpio_set_direction(LED_TX, GPIO_MODE_INPUT_OUTPUT);
-	gpio_set_direction(LED_RX, GPIO_MODE_INPUT_OUTPUT);
-
 	mtx = xSemaphoreCreateMutex();
 	init_rcv_task();
 	init_interrupt_handler();
@@ -325,8 +315,6 @@ int _send_frame(can_frame_tx_t *frame, uint8_t n) {
 	}
 
 	write_register(REG_TXBnCTRL(n), TXB_TXREQ);
-	p_tg(LED_TX);
-
 	return 0;
 }
 
