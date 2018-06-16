@@ -103,7 +103,7 @@ SemaphoreHandle_t mtx;
 
 void(*callback)(struct CanFrame *) = NULL;
 
-void IRAM_ATTR gpio_isr_handler(void* arg) {
+void gpio_isr_handler(void* arg) {
 	xQueueSendFromISR(can_irq_quee, &data, NULL);
 }
 
@@ -118,24 +118,24 @@ void remove_cb() {
 void log_rcv(void* arg) {
 	struct CanFrame *fp = NULL;
 	for(;;) {
-		if(xQueueReceive(can_frame_queue, &fp, portMAX_DELAY)) {
+		if(xQueueReceive(can_frame_queue, &fp, 1/portTICK_PERIOD_MS)) {
 			if (callback != NULL) {
 				callback(fp);
 			}
 			free(fp);
 		}
-		taskYIELD();
+    	taskYIELD ();
 	}
 }
 
 void read_frame_tsk() {
 	struct CanFrame *io_num = NULL;
 	for(;;) {
-		if(xQueueReceive(can_irq_quee, &io_num, portMAX_DELAY)) {
-			uint8_t taken = xSemaphoreTake(mtx, portMAX_DELAY);
+		if(xQueueReceive(can_irq_quee, &io_num, 1/portTICK_PERIOD_MS)) {
+			uint8_t taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
 
 			while(taken != 1) {
-				taken = xSemaphoreTake(mtx, portMAX_DELAY);
+				taken = xSemaphoreTake(mtx, 1/portTICK_PERIOD_MS);
 			}
 
 			int n = 0;
@@ -168,20 +168,11 @@ void read_frame_tsk() {
 
 				struct CanFrame *frame;
 				frame = malloc(sizeof(struct CanFrame));
-				// heap_caps_check_integrity_all(true);
 				if (frame != NULL) {
 					frame->IsExt = isExt;
 					frame->CanId = id;
 					frame->DLC = dlc;
-					frame->Data[0] = data[0];
-					frame->Data[1] = data[1];
-					frame->Data[2] = data[2];
-					frame->Data[3] = data[3];
-					frame->Data[4] = data[4];
-					frame->Data[5] = data[5];
-					frame->Data[6] = data[6];
-					frame->Data[7] = data[7];
-					// memcpy(&frame->Data, &data, sizeof(data));
+					memcpy(&frame->Data, &data, sizeof(data));
 					xQueueSend(can_frame_queue, &frame, 10);
 				}
 				mod_register(REG_CANINTF, FLAG_RXnIF(n), 0x00);
@@ -189,7 +180,7 @@ void read_frame_tsk() {
 			has_irq = false;
 			xSemaphoreGive(mtx);
 		}
-		taskYIELD();
+    	taskYIELD ();
 	}
 }
 
@@ -295,13 +286,12 @@ void bootstrap_mcp() {
 esp_err_t init_mcp(long baudRate) {
 	esp_err_t err;
 	init_once();
-	ESP_LOGI(MCP, "init_mcp");
+
 	uint8_t taken = xSemaphoreTake(mtx, portMAX_DELAY);
 
 	while(taken != 1) {
 		taken = xSemaphoreTake(mtx, portMAX_DELAY);
 	}
-	ESP_LOGI(MCP, "lck mtx");
 
 	err = send_data(&data, 1);
 	if (err) {
@@ -309,12 +299,10 @@ esp_err_t init_mcp(long baudRate) {
 		return err;
 	}
 
-	vTaskDelay(10 / portTICK_PERIOD_MS);
+	vTaskDelay(100 / portTICK_PERIOD_MS);
 
 	write_register(REG_CANCTRL, 0x80);
-	if (read_reg(REG_CANCTRL) != 0x80) {
-		err = 1;
-	};
+	err = read_reg(REG_CANCTRL) != 0x80;
 	if (err) {
 		ESP_LOGE(MCP, "write_reg REG_CANCTRL err");
 		return err;

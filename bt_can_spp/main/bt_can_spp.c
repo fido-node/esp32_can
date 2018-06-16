@@ -36,12 +36,8 @@
 #define EXAMPLE_DEVICE_NAME "CAN_ESP_IF"
 
 xQueueHandle can_frame_queue = NULL;
-xQueueHandle cdc_response_queue = NULL;
+// xQueueHandle cdc_response_queue = NULL;
 xQueueHandle can_irq_quee = NULL;
-
-extern char* SLCAN_VERSION;
-extern char* SLCAN_DEV ;
-extern char* OK_R ;
 
 uint32_t handle = 0;
 
@@ -76,7 +72,6 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 		ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",
 			param->data_ind.len, param->data_ind.handle);
 		receive_cmd(param->data_ind.data, param->data_ind.len);
-			// esp_log_buffer_hex("",param->data_ind.data,param->data_ind.len);
 		break;
 		case ESP_SPP_CONG_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
@@ -93,30 +88,11 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 	}
 }
 
-void cdc_out_task(void* arg) {
-	for(;;) {
-		struct CDCResponse *fp = NULL;
-		if(xQueueReceive(cdc_response_queue, &fp, portMAX_DELAY)) {
-			if (fp != NULL) {
-				esp_spp_write(handle, fp->length, (uint8_t *)fp->response);
-				ESP_LOGI(SPP_TAG, "kek %d, l:%d", handle, fp->length);
-				if (fp->response != SLCAN_VERSION && fp->response != SLCAN_DEV &&  fp->response != OK_R) {
-					free(fp->response);
-					heap_caps_check_integrity_all(true);
-				}
-			}
-			free(fp);
-			heap_caps_check_integrity_all(true);
-		}
-		taskYIELD();
-	}
-}
-
 void app_main() {
 	esp_err_t ret;
-	can_frame_queue = xQueueCreate(3, sizeof(uint32_t));
-	can_irq_quee = xQueueCreate(3, sizeof(uint32_t));
-	cdc_response_queue = xQueueCreate(3, sizeof(uint32_t));
+	can_frame_queue = xQueueCreate(10, sizeof(uint32_t));
+	can_irq_quee = xQueueCreate(10, sizeof(uint32_t));
+	// cdc_response_queue = xQueueCreate(10, sizeof(uint32_t));
 
 	ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
@@ -159,8 +135,6 @@ void app_main() {
 
 	init_gpio();
 	init_sl_can();
-
-	xTaskCreate(&cdc_out_task, "cdc_out_task", 2048, NULL,  10, NULL);
 
 	ret = init_spi();
 	if (ret) {
