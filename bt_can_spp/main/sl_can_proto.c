@@ -26,9 +26,7 @@ char* OK_R = "\r";
 
 
 void send_to_cdc(char *resp, uint32_t len) {
-
 	esp_spp_write(handle, len, (uint8_t *)resp);
-	ESP_LOGI(MAIN_TAG, "out to %d, bytes:%d", handle, len);
 	if (resp != SLCAN_VERSION && resp != SLCAN_DEV &&  resp != OK_R) {
 		free(resp);
 	}
@@ -36,7 +34,6 @@ void send_to_cdc(char *resp, uint32_t len) {
 
 void frame_tx_cb(uint8_t *cmd, uint32_t len) {
 	if (len > 6) {
-		ESP_LOGI(MAIN_TAG, "cdc2can %s", cmd);
 
 		struct CanFrame *f = malloc(sizeof(struct CanFrame));
 		memset(f, 0, sizeof(struct CanFrame));
@@ -64,14 +61,44 @@ void frame_tx_cb(uint8_t *cmd, uint32_t len) {
 	}
 }
 
+void frame_ext_tx_cb(uint8_t *cmd, uint32_t len) {
+	if (len > 11) {
+
+		struct CanFrame *f = malloc(sizeof(struct CanFrame));
+		memset(f, 0, sizeof(struct CanFrame));
+		if (f != NULL) {
+			char* id_s = malloc(9);
+			char* dlc_s = malloc(2);
+			char* byte_s = malloc(3);
+			// T000099994DEABBABA
+			strncpy(id_s, (char *)cmd + 1, 8);
+			strncpy(dlc_s, (char *)cmd + 9, 1);
+			f->IsExt = true;
+			f->CanId =(uint32_t) strtoul((char *) id_s, NULL, 16);
+			f->DLC = atoi(dlc_s);
+			for (uint8_t i = 0; i < f->DLC; i++) {
+				strncpy(byte_s, (char *)cmd + (10 + (2 * i)), 2);
+				f->Data[i] = (uint8_t) strtoul((char *) byte_s, NULL, 16);
+			}
+
+			free(id_s);
+			free(dlc_s);
+			free(byte_s);
+			send_frame(f);
+			free(f);
+		}
+	}
+}
+
 void frame_rx_cb(struct CanFrame *f) {
+	char* str = NULL;
+	uint8_t char_len = 6;
 	if (!f->IsExt) {
-		uint8_t char_len = 6;
+
 		char_len = char_len + (f->DLC * 2) + 1;
-		char* str = NULL;
 
 		str = malloc(char_len);
-		// heap_caps_check_integrity_all(true);
+		memset(str, 0, sizeof(char_len));
 		if (str != NULL) {
 			switch (f->DLC) {
 				case 0:
@@ -113,12 +140,58 @@ void frame_rx_cb(struct CanFrame *f) {
 					f->Data[4], f->Data[5], f->Data[6], f->Data[7]);
 				break;
 			}
-			ESP_LOGI(MAIN_TAG, "can2cdc %s", str);
-			send_to_cdc(str, char_len);
 		}
-
 	} else {
-		ESP_LOGI(MAIN_TAG, "EXT?!?!?!");
+		char_len = 11;
+		char_len = char_len + (f->DLC * 2) + 1;
+
+		str = malloc(char_len);
+		memset(str, 0, sizeof(char_len));
+		if (str != NULL) {
+			switch (f->DLC) {
+				case 0:
+				sprintf(str, "T%08x%d\r", f->CanId, f->DLC);
+				break;
+				case 1:
+				sprintf(str, "T%08x%d%02x\r", f->CanId, f->DLC, f->Data[0]);
+				break;
+				case 2:
+				sprintf(str, "T%08x%d%02x%02x\r", f->CanId, f->DLC,
+					f->Data[0], f->Data[1]);
+				break;
+				case 3:
+				sprintf(str, "T%08x%d%02x%02x%02x\r", f->CanId, f->DLC,
+					f->Data[0], f->Data[1], f->Data[2]);
+				break;
+				case 4:
+				sprintf(str, "T%08x%d%02x%02x%02x%02x\r", f->CanId,
+					f->DLC, f->Data[0], f->Data[1], f->Data[2], f->Data[3]);
+				break;
+				case 5:
+				sprintf(str, "T%08x%d%02x%02x%02x%02x%02x\r" , f->CanId,
+					f->DLC, f->Data[0], f->Data[1], f->Data[2], f->Data[3],
+					f->Data[4]);
+				break;
+				case 6:
+				sprintf(str, "T%08x%d%02x%02x%02x%02x%02x%02x\r", f->CanId,
+					f->DLC, f->Data[0], f->Data[1], f->Data[2], f->Data[3],
+					f->Data[4], f->Data[5]);
+				break;
+				case 7:
+				sprintf(str, "T%08x%d%02x%02x%02x%02x%02x%02x%02x\r", f->CanId,
+					f->DLC, f->Data[0], f->Data[1], f->Data[2], f->Data[3],
+					f->Data[4], f->Data[5], f->Data[6]);
+				break;
+				case 8:
+				sprintf(str, "T%08x%d%02x%02x%02x%02x%02x%02x%02x%02x\r", f->CanId,
+					f->DLC, f->Data[0], f->Data[1], f->Data[2], f->Data[3],
+					f->Data[4], f->Data[5], f->Data[6], f->Data[7]);
+				break;
+			}
+		}
+	}
+	if (str != NULL) {
+		send_to_cdc(str, char_len);
 	}
 }
 
@@ -194,6 +267,10 @@ void receive_cmd(uint8_t *cmd, uint32_t len) {
 		ESP_LOGI(MAIN_TAG, "t");
 		send_to_cdc(OK_R, 1);
 		frame_tx_cb(cmd, len);
+		case 'T':
+		ESP_LOGI(MAIN_TAG, "T");
+		send_to_cdc(OK_R, 1);
+		frame_ext_tx_cb(cmd, len);
 		break;
 		default:
 		send_to_cdc(OK_R, 1);
