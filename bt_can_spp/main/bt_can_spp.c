@@ -28,135 +28,102 @@
 #include "spi_routine.h"
 #include "MCP2515.h"
 #include "can.h"
+#include "sl_can_proto.h"
 
 #define MAIN_TAG "MAIN"
 #define SPP_TAG "SPP_ACCEPTOR"
 #define SPP_SERVER_NAME "SPP_SERVER"
 #define EXAMPLE_DEVICE_NAME "CAN_ESP_IF"
-#define SPP_SHOW_DATA 0
-#define SPP_SHOW_SPEED 1
-#define SPP_SHOW_MODE SPP_SHOW_SPEED
 
-xQueueHandle can_evt_queue = NULL;
 xQueueHandle can_frame_queue = NULL;
+xQueueHandle cdc_response_queue = NULL;
+xQueueHandle can_irq_quee = NULL;
 
+extern char* SLCAN_VERSION;
+extern char* SLCAN_DEV ;
+extern char* OK_R ;
+
+uint32_t handle = 0;
 
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
-
-static struct timeval time_new, time_old;
-static long data_num = 0;
-
 static const esp_spp_sec_t sec_mask = ESP_SPP_SEC_NONE;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
-
-
-static void print_speed(void) {
-	float time_old_s = time_old.tv_sec + time_old.tv_usec / 1000000.0;
-	float time_new_s = time_new.tv_sec + time_new.tv_usec / 1000000.0;
-	float time_interval = time_new_s - time_old_s;
-	float speed = data_num * 8 / time_interval / 1000.0;
-	ESP_LOGI(SPP_TAG, "speed(%fs ~ %fs): %f kbit/s" , time_old_s, time_new_s, speed);
-	data_num = 0;
-	time_old.tv_sec = time_new.tv_sec;
-	time_old.tv_usec = time_new.tv_usec;
-}
 
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 	switch (event) {
 		case ESP_SPP_INIT_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_INIT_EVT");
-			esp_bt_dev_set_device_name(EXAMPLE_DEVICE_NAME);
-			esp_bt_gap_set_scan_mode(ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
-			esp_spp_start_srv(sec_mask,role_slave, 0, SPP_SERVER_NAME);
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_INIT_EVT");
+		esp_bt_dev_set_device_name(EXAMPLE_DEVICE_NAME);
+		esp_bt_gap_set_scan_mode(ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
+		esp_spp_start_srv(sec_mask,role_slave, 0, SPP_SERVER_NAME);
+		break;
 		case ESP_SPP_DISCOVERY_COMP_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT");
+		break;
 		case ESP_SPP_OPEN_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_OPEN_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_OPEN_EVT");
+		break;
 		case ESP_SPP_CLOSE_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT");
+		break;
 		case ESP_SPP_START_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT");
+		break;
 		case ESP_SPP_CL_INIT_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
+		break;
 		case ESP_SPP_DATA_IND_EVT:
-	#if (SPP_SHOW_MODE == SPP_SHOW_DATA)
-			ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",
-					 param->data_ind.len, param->data_ind.handle);
-			esp_log_buffer_hex("",param->data_ind.data,param->data_ind.len);
-	#else
-			gettimeofday(&time_new, NULL);
-			data_num += param->data_ind.len;
-			if (time_new.tv_sec - time_old.tv_sec >= 3) {
-				print_speed();
-			}
-	#endif
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",
+			param->data_ind.len, param->data_ind.handle);
+		receive_cmd(param->data_ind.data, param->data_ind.len);
+			// esp_log_buffer_hex("",param->data_ind.data,param->data_ind.len);
+		break;
 		case ESP_SPP_CONG_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
+		break;
 		case ESP_SPP_WRITE_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_WRITE_EVT");
-			break;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_WRITE_EVT");
+		break;
 		case ESP_SPP_SRV_OPEN_EVT:
-			ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
-			gettimeofday(&time_old, NULL);
-			break;
+		handle = param->write.handle;
+		ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
+		break;
 		default:
-			break;
+		break;
 	}
 }
 
-void send_can(void* arg) {
-	can_frame_tx_t frame = {
-		.IsExt = true,
-		.CanId = 1,
-		.DLC = 5,
-		.Data = {0xDE, 0xAD, 0x00, 0xBE, 0xAF},
-	};
-
+void cdc_out_task(void* arg) {
 	for(;;) {
-		ESP_LOGI(MAIN_TAG, "SND CAN FRM");
-		send_frame(&frame);
-		vTaskDelay(500/portTICK_PERIOD_MS);
+		struct CDCResponse *fp = NULL;
+		if(xQueueReceive(cdc_response_queue, &fp, portMAX_DELAY)) {
+			if (fp != NULL) {
+				esp_spp_write(handle, fp->length, (uint8_t *)fp->response);
+				ESP_LOGI(SPP_TAG, "kek %d, l:%d", handle, fp->length);
+				if (fp->response != SLCAN_VERSION && fp->response != SLCAN_DEV &&  fp->response != OK_R) {
+					free(fp->response);
+					heap_caps_check_integrity_all(true);
+				}
+			}
+			free(fp);
+			heap_caps_check_integrity_all(true);
+		}
+		taskYIELD();
 	}
-}
-
-void test_can_routine() {
-	loopback_mcp();
-	xTaskCreate(&send_can, "can_send_task", 2048, NULL, 10, NULL);
-}
-
-void frame_cb(can_frame_tx_t *f) {
-	ESP_LOGI(MAIN_TAG, "ID: %li, DLC: %d, [%x,%x,%x,%x,%x,%x,%x,%x]",
-		f->CanId,
-		f->DLC,
-		f->Data[0],
-		f->Data[1],
-		f->Data[2],
-		f->Data[3],
-		f->Data[4],
-		f->Data[5],
-		f->Data[6],
-		f->Data[7]);
 }
 
 void app_main() {
 	esp_err_t ret;
-	can_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-	can_frame_queue = xQueueCreate(10, sizeof(uint32_t));
+	can_frame_queue = xQueueCreate(3, sizeof(uint32_t));
+	can_irq_quee = xQueueCreate(3, sizeof(uint32_t));
+	cdc_response_queue = xQueueCreate(3, sizeof(uint32_t));
 
 	ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
 		ESP_ERROR_CHECK(nvs_flash_erase());
 		ret = nvs_flash_init();
 	}
-	ESP_ERROR_CHECK( ret );
+	ESP_ERROR_CHECK(ret);
 
 
 	esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -191,29 +158,22 @@ void app_main() {
 	}
 
 	init_gpio();
+	init_sl_can();
 
-	set_cb(&frame_cb);
+	xTaskCreate(&cdc_out_task, "cdc_out_task", 2048, NULL,  10, NULL);
 
 	ret = init_spi();
 	if (ret) {
 		ESP_LOGE(MAIN_TAG, "%s initialize spi failed\n", __func__);
 		return;
 	}
+	bootstrap_mcp();
 
-
-	ret = init_mcp((long) 500E3);
-	if (ret) {
-		ESP_LOGE(MAIN_TAG, "%s initialize mcp failed\n", __func__);
-		return;
-	}
-
-	// test_can_routine();
-
-	ret = enable_mcp();
-	if (ret) {
-		ESP_LOGE(MAIN_TAG, "enable mcp fail");
-		return;
-	}
+	// ret = init_spi();
+	// if (ret) {
+	// 	ESP_LOGE(MAIN_TAG, "%s initialize spi failed\n", __func__);
+	// 	return;
+	// }
 
 }
 

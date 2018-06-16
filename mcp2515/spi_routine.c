@@ -80,7 +80,6 @@ esp_err_t mod_register(uint8_t addr, uint8_t mask, uint8_t val) {
 }
 
 uint8_t read_reg(uint8_t addr) {
-	esp_err_t ret;
 	spi_transaction_t r;
 
 	uint8_t data[2];
@@ -92,7 +91,7 @@ uint8_t read_reg(uint8_t addr) {
 	r.tx_buffer=&data;
 	r.flags = SPI_TRANS_USE_RXDATA;
 
-	ret = spi_device_transmit(spi, &r);
+	spi_device_transmit(spi, &r);
 	return r.rx_data[2];
 }
 

@@ -6,10 +6,13 @@
 #define CAN_INT 17
 
 esp_err_t init_mcp(long baudRate);
-esp_err_t send_frame(can_frame_tx_t *frame);
+esp_err_t send_frame(struct CanFrame *frame);
 int loopback_mcp();
 int disable_mcp();
 int enable_mcp();
-void set_cb(void(*cb)(can_frame_tx_t *));
+void reset_mcp();
+void set_cb(void(*cb)(struct CanFrame *));
 void remove_cb();
+
+void bootstrap_mcp();
 #endif
