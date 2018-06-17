@@ -3,6 +3,8 @@
 #include "esp_system.h"
 #include "esp_err.h"
 
+#include "esp_log.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -15,6 +17,8 @@
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 #define PIN_NUM_CS   15
+
+#define MCP "SPI"
 
 static spi_device_handle_t spi;
 
@@ -92,6 +96,8 @@ uint8_t read_reg(uint8_t addr) {
 	r.flags = SPI_TRANS_USE_RXDATA;
 
 	spi_device_transmit(spi, &r);
+	// ESP_LOGE(MCP, "r: [%02x, %02x, %02x, %02x]",
+		// r.rx_data[0], r.rx_data[1], r.rx_data[2], r.rx_data[3]);
 	return r.rx_data[2];
 }
 

@@ -60,6 +60,7 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
 		ESP_LOGI(SPP_TAG, "ESP_SPP_OPEN_EVT");
 		break;
 		case ESP_SPP_CLOSE_EVT:
+		reset_mcp();
 		ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT");
 		break;
 		case ESP_SPP_START_EVT:

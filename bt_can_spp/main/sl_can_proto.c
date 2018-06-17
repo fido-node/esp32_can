@@ -191,6 +191,7 @@ void frame_rx_cb(struct CanFrame *f) {
 		}
 	}
 	if (str != NULL) {
+		ESP_LOGI(MAIN_TAG, "%s", str);
 		send_to_cdc(str, char_len);
 	}
 }
@@ -249,14 +250,12 @@ void receive_cmd(uint8_t *cmd, uint32_t len) {
 		case 'O':
 		ESP_LOGI(MAIN_TAG, "O");
 		send_to_cdc(OK_R, 1);
-		init_mcp(baud);
-		// enable_mcp();
-		loopback_mcp();
+		init_mcp(baud, OPEN_MODE);
 		break;
 		case 'L':
 		ESP_LOGI(MAIN_TAG, "L");
 		send_to_cdc(OK_R, 1);
-		loopback_mcp();
+		init_mcp(baud, LOOPBACK_MODE);
 		break;
 		case 'C':
 		ESP_LOGI(MAIN_TAG, "C");
