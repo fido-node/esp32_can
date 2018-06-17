@@ -36,7 +36,7 @@
 #define EXAMPLE_DEVICE_NAME "CAN_ESP_IF"
 
 xQueueHandle can_frame_queue = NULL;
-// xQueueHandle cdc_response_queue = NULL;
+SemaphoreHandle_t cdc_mtx;
 xQueueHandle can_irq_quee = NULL;
 
 uint32_t handle = 0;
@@ -93,6 +93,8 @@ void app_main() {
 	esp_err_t ret;
 	can_frame_queue = xQueueCreate(10, sizeof(uint32_t));
 	can_irq_quee = xQueueCreate(10, sizeof(uint32_t));
+	cdc_mtx = xSemaphoreCreateMutex();
+
 	// cdc_response_queue = xQueueCreate(10, sizeof(uint32_t));
 
 	ret = nvs_flash_init();

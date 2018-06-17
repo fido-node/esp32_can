@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 
 #include "esp_log.h"
 #include "esp_spp_api.h"
@@ -24,12 +25,21 @@ char* SLCAN_VERSION =  "V0101\r";
 char* SLCAN_DEV =  "vSTM32\r";
 char* OK_R = "\r";
 
+extern SemaphoreHandle_t cdc_mtx;
 
 void send_to_cdc(char *resp, uint32_t len) {
+
+	uint8_t taken = xSemaphoreTake(cdc_mtx, portMAX_DELAY);
+	while(taken != 1) {
+		taken = xSemaphoreTake(cdc_mtx, portMAX_DELAY);
+	}
+
 	esp_spp_write(handle, len, (uint8_t *)resp);
 	if (resp != SLCAN_VERSION && resp != SLCAN_DEV &&  resp != OK_R) {
 		free(resp);
 	}
+
+	xSemaphoreGive(cdc_mtx);
 }
 
 void frame_tx_cb(uint8_t *cmd, uint32_t len) {
@@ -191,8 +201,8 @@ void frame_rx_cb(struct CanFrame *f) {
 		}
 	}
 	if (str != NULL) {
-		ESP_LOGI(MAIN_TAG, "%s", str);
-		send_to_cdc(str, char_len);
+		// ESP_LOGI(MAIN_TAG, "%s", str);
+		send_to_cdc(str, char_len - 1);
 	}
 }
 
