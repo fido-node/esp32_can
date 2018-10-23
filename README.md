@@ -4,7 +4,7 @@ ESP32 BT SLCAN implementation
 WTF
 ---
 
-esp32 firmware for handling SLCAN protocol. Need additional hw - MCP2515 + TJA1050. Current implementation use only loopback mode.
+esp32 firmware for handling SLCAN protocol. Need additional hw - MCP2515 + TJA1050.
 _______________________
 
 Not implemented
